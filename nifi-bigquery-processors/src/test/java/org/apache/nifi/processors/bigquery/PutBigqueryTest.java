@@ -75,6 +75,47 @@ public class PutBigqueryTest {
 
 
     }
+    
+    @Test
+    public void shouldSuccessfulWhenDataArrayAreWriteCorrectly() {
+        
+        // Inject a mock BigQuery to insert data
+        final BigQuery mockBigQuery = Mockito.mock(BigQuery.class);
+        
+        
+        //mock row of data to insert
+        Map<String, Integer> row = new HashMap<>();
+        row.put("test_col", 2);
+        InsertAllRequest.RowToInsert rowToInsert = InsertAllRequest.RowToInsert.of(row);
+        //mock insert bigquery insert request
+        InsertAllRequest insertAllRequest = InsertAllRequest.of("test_dataset", "test_table", rowToInsert);
+        // mock success writing
+        InsertAllResponse insertAllResponse = mock(InsertAllResponse.class);
+        when(insertAllResponse.hasErrors()).thenReturn(false);
+        when(mockBigQuery.insertAll(insertAllRequest)).thenReturn(insertAllResponse);
+        
+        putBigquery = new PutBigquery() {
+            @Override
+            protected BigQuery getBigQuery() {
+                return mockBigQuery;
+            }
+        };
+        
+        final TestRunner putRunner = TestRunners.newTestRunner(putBigquery);
+        
+        putRunner.setProperty(AbstractBigqueryProcessor.SERVICE_ACCOUNT_CREDENTIALS_JSON, "{}");
+        putRunner.setProperty(PutBigquery.TABLE, "test_table");
+        putRunner.setProperty(PutBigquery.DATASET, "test_dataset");
+        
+        String document = "[{\"test_col\": 2}]";
+        putRunner.enqueue(document.getBytes());
+        
+        putRunner.run(1,true,false);
+        
+        putRunner.assertAllFlowFilesTransferred(AbstractBigqueryProcessor.REL_SUCCESS, 1);
+        
+        
+    }
 
     @Test
     public void shouldFailWhenFlowFileIsNotAValidJson() {
