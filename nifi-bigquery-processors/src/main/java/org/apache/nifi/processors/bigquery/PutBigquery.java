@@ -59,32 +59,61 @@ public class PutBigquery extends AbstractBigqueryProcessor {
         FlowFile flowFile = session.get();
         final String table = context.getProperty(TABLE).getValue();
         final String dataset = context.getProperty(DATASET).getValue();
-
-
+        
+        
         ObjectMapper mapper = new ObjectMapper();
         try {
-            Map<String, Object> jsonDocument = mapper.readValue(session.read(flowFile), new TypeReference<NotNullValuesHashMap<String, Object>>() {
-            });
-            InsertAllRequest.RowToInsert rowToInsert = InsertAllRequest.RowToInsert.of(jsonDocument);
-            BigQuery bigQuery = getBigQuery();
-
-            InsertAllRequest insertAllRequest = InsertAllRequest.of(dataset, table, rowToInsert);
-
-
-            InsertAllResponse insertAllResponse = bigQuery.insertAll(insertAllRequest);
-
-            if (insertAllResponse.hasErrors()) {
-                session.transfer(flowFile, REL_FAILURE);
-            } else {
-                session.transfer(flowFile, REL_SUCCESS);
+            InputStream flowfileContentsStream = session.read(flowFile);
+            String flowfileContents = IOUtils.toString(flowfileContentsStream,  StandardCharsets.UTF_8);
+            flowfileContentsStream.close();
+            JsonNode rootNode = mapper.readTree(flowfileContents);
+            
+            // Start by checking if this is a list -> the order is important here:
+            if (rootNode instanceof ArrayNode) {
+                
+                List<Map<String, Object>> jsonDocuments = mapper.readValue(flowfileContents, new TypeReference<List<NotNullValuesHashMap<String, Object>>>() {});
+                
+                BigQuery bigQuery = getBigQuery();
+                
+                TableId tableId = TableId.of(dataset, table);
+                InsertAllRequest.Builder insertRequestBuilder = InsertAllRequest.newBuilder(tableId);
+                for(Map<String, Object> doc: jsonDocuments){
+                    insertRequestBuilder.addRow(doc);
+                }
+                
+                InsertAllResponse insertAllResponse = bigQuery.insertAll(insertRequestBuilder.build());
+                if (insertAllResponse.hasErrors()) {
+                    session.transfer(flowFile, REL_FAILURE);
+                } else {
+                    session.transfer(flowFile, REL_SUCCESS);
+                }
+                
+            } else if (rootNode instanceof JsonNode) {
+                // Read the json as a single object:
+                Map<String, Object> jsonDocument = mapper.readValue(session.read(flowFile), new TypeReference<NotNullValuesHashMap<String, Object>>() {});
+                
+                InsertAllRequest.RowToInsert rowToInsert = InsertAllRequest.RowToInsert.of(jsonDocument);
+                BigQuery bigQuery = getBigQuery();
+                
+                InsertAllRequest insertAllRequest = InsertAllRequest.of(dataset, table, rowToInsert);
+                
+                
+                InsertAllResponse insertAllResponse = bigQuery.insertAll(insertAllRequest);
+                
+                if (insertAllResponse.hasErrors()) {
+                    session.transfer(flowFile, REL_FAILURE);
+                } else {
+                    session.transfer(flowFile, REL_SUCCESS);
+                }
             }
-
-
+            
+            
+            
         } catch (IOException ioe) {
             getLogger().error("IOException while reading JSON item: " + ioe.getMessage());
             session.transfer(flowFile, REL_FAILURE);
         }
-
-
+        
+        
     }
 }
